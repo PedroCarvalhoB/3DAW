@@ -1,0 +1,2 @@
+Id;Pergunta;TipoResposta;Certa;
+1;Quando o Minecraft foi lançado?;Multi;b);
