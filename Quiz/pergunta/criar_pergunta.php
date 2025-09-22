@@ -1,76 +1,89 @@
 <?php
+session_start();
+if ($_SESSION['role'] !== 'admin') {
+    header('Location: ../index.php');
+    exit;
+}
 
-define('FilePerg','perguntas.txt');
+$perguntasPath = __DIR__ . '/../perguntas.txt';
+$respostasPath = __DIR__ . '/../respostas.txt';
 
-function carregarPerguntas() { 
-    // Verifica se o arquivo existe
-    if (!file_exists(FilePerg)) { 
-        return []; // Retorna array vazio se não existir
-    } 
-    $perguntas = []; // Inicializa array de disciplinas
-    $handle = fopen(FilePerg, 'r'); // Abre o arquivo para leitura
-    // Lê cada linha do CSV
-    while (($dados = fgetcsv($handle)) !== FALSE) { 
-        // Armazena os dados no array usando o ID como chave
-        $perguntas[$dados[0]] = ['id' => $dados[0], 'pergunta' => $dados[1], 'tipoResposta' => $dados[2], 'certa' => $dados[3]]; 
-    } 
-    fclose($handle); // Fecha o arquivo
-    return $perguntas; // Retorna o array de disciplinas
-} 
+function nextIdFromFile($path) {
+    if (!file_exists($path)) return 1;
+    $lines = file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    $max = 0;
+    foreach ($lines as $i => $line) {
+        if ($i === 0 && stripos($line, 'Id;') === 0) continue;
+        $cols = explode(';', $line);
+        if (isset($cols[0]) && is_numeric($cols[0])) $max = max($max, intval($cols[0]));
+    }
+    return $max + 1;
+}
 
-// Função para salvar disciplinas no arquivo CSV
-function salvarPerguntas($perguntas) { 
-    $handle = fopen(FilePerg, 'w'); // Abre o arquivo para escrita (sobrescreve)
-    foreach ($perguntas as $pergunta) { 
-        fputcsv($handle, $pergunta); // Escreve cada disciplina no arquivo CSV
-    } 
-    fclose($handle); // Fecha o arquivo
-} 
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $texto = trim($_POST['texto'] ?? '');
+    $tipo = $_POST['tipo'] ?? 'Texto';
+    $certa = trim($_POST['certa'] ?? '');
 
-function proximoId($perguntas) { 
-    // Se houver disciplinas, encontra o maior ID e adiciona 1, caso contrário retorna 1
-    return count($perguntas) > 0 ? max(array_keys($perguntas)) + 1 : 1; 
-} 
+    if ($texto === '') {
+        $error = 'Pergunta não pode ficar vazia.';
+    } else {
+        // garante cabeçalho em perguntas.txt
+        if (!file_exists($perguntasPath) || filesize($perguntasPath) === 0) {
+            file_put_contents($perguntasPath, "Id;Pergunta;TipoResposta;Certa;" . PHP_EOL);
+        }
+        $id = nextIdFromFile($perguntasPath);
+        $line = $id . ';' . str_replace(["\r","\n"], ['',''], $texto) . ';' . $tipo . ';' . $certa . ';' . PHP_EOL;
+        file_put_contents($perguntasPath, $line, FILE_APPEND);
 
-// Obtém a ação a ser realizada a partir da URL (padrão: 'listar')
-$acao = $_GET['acao'] ?? 'listar'; 
-// Obtém o ID a partir da URL (se existir)
-$id = $_GET['id'] ?? null; 
-$mensagem = ''; // Inicializa variável para mensagens
-$erros = []; // Inicializa array para erros
-$perguntas = carregarPerguntas(); // Carrega as disciplinas do arquivo
+        // se tipo Multi, escreve respostas A-D
+        if ($tipo === 'Multi') {
+            // garante cabeçalho em respostas.txt
+            if (!file_exists($respostasPath) || filesize($respostasPath) === 0) {
+                file_put_contents($respostasPath, "Id;IdPergunta;Resposta;Letra" . PHP_EOL);
+            }
+            $letters = ['a','b','c','d'];
+            foreach ($letters as $ltr) {
+                $text = trim($_POST['resposta_' . $ltr] ?? '');
+                if ($text === '') continue;
+                $rid = nextIdFromFile($respostasPath);
+                $rline = $rid . ';' . $id . ';' . str_replace(["\r","\n"], ['',''], $text) . ';' . $ltr . PHP_EOL;
+                file_put_contents($respostasPath, $rline, FILE_APPEND);
+            }
+        }
 
-// Processamento de formulários (método POST)
-if ($_SERVER['REQUEST_METHOD'] === 'POST') { 
-    // Obtém e limpa os dados do formulário
-    $nome = trim($_POST['nome'] ?? ''); 
-    $codigo = trim($_POST['codigo'] ?? ''); 
-    $carga_horaria = trim($_POST['carga_horaria'] ?? ''); 
-    $id_form = $_POST['id'] ?? null; 
-    
-    // Validações
-    if (empty($nome)) $erros[] = 'O nome é obrigatório.'; 
-    if (empty($codigo)) $erros[] = 'O código é obrigatório.'; 
-    if (!is_numeric($carga_horaria) || $carga_horaria <= 0) $erros[] = 'A carga horária deve ser um número positivo.'; 
-    
-    // Se não houver erros
-    if (count($erros) === 0) { 
-        if ($acao === 'criar') { 
-            // Cria uma nova disciplina
-            $novoId = proximoId($disciplinas); 
-            $disciplinas[$novoId] = ['id' => $novoId, 'nome' => $nome, 'codigo' => $codigo, 'carga_horaria' => $carga_horaria]; 
-            $mensagem = 'Disciplina adicionada com sucesso!'; 
-        } elseif ($acao === 'editar' && isset($disciplinas[$id_form])) { 
-            // Edita uma disciplina existente
-            $disciplinas[$id_form] = ['id' => $id_form, 'nome' => $nome, 'codigo' => $codigo, 'carga_horaria' => $carga_horaria]; 
-            $mensagem = 'Disciplina atualizada com sucesso!'; 
-        } 
-        salvarDisciplinas($disciplinas); // Salva as alterações no arquivo
-        // Redireciona para evitar reenvio do formulário
-        header('Location: ' . $_SERVER['PHP_SELF'] . '?mensagem=' . urlencode($mensagem)); 
-        exit; 
-    } 
-} 
-
+        header('Location: listar_perguntas.php');
+        exit;
+    }
+}
 ?>
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Criar Pergunta</title>
+</head>
+<body>
+<h1>Criar Pergunta</h1>
+<form method="post">
+    <label>Pergunta:<br><textarea name="texto" rows="4" cols="60"><?= htmlspecialchars($_POST['texto'] ?? '') ?></textarea></label><br>
+    <label>Tipo:
+        <label><input type="radio" name="tipo" value="Multi" <?= (($_POST['tipo'] ?? '') === 'Multi') ? 'checked' : '' ?>> Múltipla escolha</label>
+        <label><input type="radio" name="tipo" value="Texto" <?= (($_POST['tipo'] ?? '') === 'Texto' || $_POST === []) ? 'checked' : '' ?>> Texto</label>
+    </label><br>
+    <div id="multi_fields" style="margin-top:10px;">
+        <strong>Opções (para Multi)</strong><br>
+        <label>A: <input type="text" name="resposta_a" value="<?= htmlspecialchars($_POST['resposta_a'] ?? '') ?>"></label><br>
+        <label>B: <input type="text" name="resposta_b" value="<?= htmlspecialchars($_POST['resposta_b'] ?? '') ?>"></label><br>
+        <label>C: <input type="text" name="resposta_c" value="<?= htmlspecialchars($_POST['resposta_c'] ?? '') ?>"></label><br>
+        <label>D: <input type="text" name="resposta_d" value="<?= htmlspecialchars($_POST['resposta_d'] ?? '') ?>"></label><br>
+        <label>Letra correta: <input type="text" name="certa" value="<?= htmlspecialchars($_POST['certa'] ?? '') ?>"></label><br>
+    </div>
+    <button type="submit">Salvar</button>
+</form>
+<?php if (!empty($error)): ?>
+    <p style="color:red;"><?= htmlspecialchars($error) ?></p>
+<?php endif; ?>
+</body>
+</html>
 
